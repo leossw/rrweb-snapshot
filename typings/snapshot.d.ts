@@ -1,6 +1,10 @@
-import { serializedNodeWithId, idNodeMap, snapshotOptions, serializeOptions } from './types';
+import { serializedNodeWithId, INode, idNodeMap, snapshotOptions, serializeOptions, MaskInputOptions, SlimDOMOptions } from './types';
+export declare const IGNORED_NODE = -2;
 export declare function resetId(): void;
-export declare function absoluteToStylesheet(cssText: string, href: string): string;
-export declare function serializeNodeWithId(n: Node, doc: Document, map: idNodeMap, options?: serializeOptions): serializedNodeWithId | null;
-declare function snapshot(n: Document, options?: snapshotOptions): [serializedNodeWithId | null, idNodeMap];
+export declare function absoluteToStylesheet(cssText: string | null, href: string): string;
+export declare function absoluteToDoc(doc: Document, attributeValue: string): string;
+export declare function transformAttribute(doc: Document, name: string, value: string): string;
+export declare function serializeNodeWithId(n: Node | INode, doc: Document, map: idNodeMap, blockClass: string | RegExp, skipChild?: boolean, inlineStylesheet?: boolean, maskInputOptions?: MaskInputOptions, slimDOMOptions?: SlimDOMOptions, recordCanvas?: boolean, preserveWhiteSpace?: boolean, onVisit?: any): serializedNodeWithId | null;
+declare function snapshot(n: Document, blockClass: string | RegExp | undefined, inlineStylesheet: boolean | undefined, maskAllInputsOrOptions: boolean | MaskInputOptions, recordCanvas?: boolean, onVisit?: any, slimDOMSensibleOrOptions?: boolean | SlimDOMOptions): [serializedNodeWithId | null, idNodeMap];
+export declare function visitSnapshot(node: serializedNodeWithId, onVisit: (node: serializedNodeWithId) => unknown): void;
 export default snapshot;

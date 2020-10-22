@@ -17,7 +17,7 @@ export declare type documentTypeNode = {
     systemId: string;
 };
 export declare type attributes = {
-    [key: string]: string | boolean;
+    [key: string]: string | number | boolean;
 };
 export declare type elementNode = {
     type: NodeType.Element;
@@ -63,3 +63,32 @@ export declare type snapshotOptions = {
 export declare type serializeOptions = snapshotOptions & {
     skipChild?: boolean;
 };
+export declare type MaskInputOptions = Partial<{
+    color: boolean;
+    date: boolean;
+    'datetime-local': boolean;
+    email: boolean;
+    month: boolean;
+    number: boolean;
+    range: boolean;
+    search: boolean;
+    tel: boolean;
+    text: boolean;
+    time: boolean;
+    url: boolean;
+    week: boolean;
+    textarea: boolean;
+    select: boolean;
+}>;
+export declare type SlimDOMOptions = Partial<{
+    script: boolean;
+    comment: boolean;
+    headFavicon: boolean;
+    headWhitespace: boolean;
+    headMetaDescKeywords: boolean;
+    headMetaSocial: boolean;
+    headMetaRobots: boolean;
+    headMetaHttpEquiv: boolean;
+    headMetaAuthorship: boolean;
+    headMetaVerification: boolean;
+}>;

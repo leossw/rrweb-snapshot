@@ -1,3 +1,4 @@
+import { parse } from './css';
 import {
   serializedNodeWithId,
   NodeType,
@@ -56,29 +57,36 @@ function getTagName(n: elementNode): string {
   return tagName;
 }
 
-const CSS_SELECTOR = /([^\r\n,{}]+)(,(?=[^}]*{)|\s*{)/g;
 const HOVER_SELECTOR = /([^\\]):hover/g;
 export function addHoverClass(cssText: string): string {
-  return cssText.replace(CSS_SELECTOR, (match, p1: string, p2: string) => {
-    if (HOVER_SELECTOR.test(p1)) {
-      const newSelector = p1.replace(HOVER_SELECTOR, '$1.\\:hover');
-      return `${p1.replace(/\s*$/, '')}, ${newSelector.replace(
-        /^\s*/,
-        '',
-      )}${p2}`;
-    } else {
-      return match;
+  const ast = parse(cssText, { silent: true });
+  if (!ast.stylesheet) {
+    return cssText;
+  }
+  ast.stylesheet.rules.forEach((rule) => {
+    if ('selectors' in rule) {
+      (rule.selectors || []).forEach((selector: string) => {
+        if (HOVER_SELECTOR.test(selector)) {
+          const newSelector = selector.replace(HOVER_SELECTOR, '$1.\\:hover');
+          cssText = cssText.replace(selector, `${selector}, ${newSelector}`);
+        }
+      });
     }
   });
+  return cssText;
 }
 
-function buildNode(n: serializedNodeWithId, doc: Document): Node | null {
+function buildNode(
+  n: serializedNodeWithId,
+  doc: Document,
+  HACK_CSS: boolean,
+): Node | null {
   switch (n.type) {
     case NodeType.Document:
       return doc.implementation.createDocument(null, '', null);
     case NodeType.DocumentType:
       return doc.implementation.createDocumentType(
-        n.name,
+        n.name || 'html',
         n.publicId,
         n.systemId,
       );
@@ -91,18 +99,28 @@ function buildNode(n: serializedNodeWithId, doc: Document): Node | null {
         node = doc.createElement(tagName);
       }
       for (const name in n.attributes) {
+        if (!n.attributes.hasOwnProperty(name)) {
+          continue;
+        }
+        let value = n.attributes[name];
+        value =
+          typeof value === 'boolean' || typeof value === 'number' ? '' : value;
         // attribute names start with rr_ are internal attributes added by rrweb
-        if (n.attributes.hasOwnProperty(name) && !name.startsWith('rr_')) {
-          let value = n.attributes[name];
-          value = typeof value === 'boolean' ? '' : value;
+        if (!name.startsWith('rr_')) {
           const isTextarea = tagName === 'textarea' && name === 'value';
           const isRemoteOrDynamicCss =
             tagName === 'style' && name === '_cssText';
-          if (isRemoteOrDynamicCss) {
+          if (isRemoteOrDynamicCss && HACK_CSS) {
             value = addHoverClass(value);
           }
           if (isTextarea || isRemoteOrDynamicCss) {
             const child = doc.createTextNode(value);
+            // https://github.com/rrweb-io/rrweb/issues/112
+            for (const c of Array.from(node.childNodes)) {
+              if (c.nodeType === node.TEXT_NODE) {
+                node.removeChild(c);
+              }
+            }
             node.appendChild(child);
             continue;
           }
@@ -110,25 +128,57 @@ function buildNode(n: serializedNodeWithId, doc: Document): Node | null {
             continue;
           }
           try {
-            node.setAttribute(name, value);
+            if (n.isSVG && name === 'xlink:href') {
+              node.setAttributeNS('http://www.w3.org/1999/xlink', name, value);
+            } else if (
+              name === 'onload' ||
+              name === 'onclick' ||
+              name.substring(0, 7) === 'onmouse'
+            ) {
+              // Rename some of the more common atttributes from https://www.w3schools.com/tags/ref_eventattributes.asp
+              // as setting them triggers a console.error (which shows up despite the try/catch)
+              // Assumption: these attributes are not used to css
+              node.setAttribute('_' + name, value);
+            } else {
+              node.setAttribute(name, value);
+            }
           } catch (error) {
             // skip invalid attribute
           }
         } else {
           // handle internal attributes
-          if (n.attributes.rr_width) {
-            (node as HTMLElement).style.width = n.attributes.rr_width as string;
+          if (tagName === 'canvas' && name === 'rr_dataURL') {
+            const image = document.createElement('img');
+            image.src = value;
+            image.onload = () => {
+              const ctx = (node as HTMLCanvasElement).getContext('2d');
+              if (ctx) {
+                ctx.drawImage(image, 0, 0, image.width, image.height);
+              }
+            };
           }
-          if (n.attributes.rr_height) {
-            (node as HTMLElement).style.height = n.attributes
-              .rr_height as string;
+          if (name === 'rr_width') {
+            (node as HTMLElement).style.width = value;
+          }
+          if (name === 'rr_height') {
+            (node as HTMLElement).style.height = value;
+          }
+          if (name === 'rr_mediaState') {
+            switch (value) {
+              case 'played':
+                (node as HTMLMediaElement).play();
+              case 'paused':
+                (node as HTMLMediaElement).pause();
+                break;
+              default:
+            }
           }
         }
       }
       return node;
     case NodeType.Text:
       return doc.createTextNode(
-        n.isStyle ? addHoverClass(n.textContent) : n.textContent,
+        n.isStyle && HACK_CSS ? addHoverClass(n.textContent) : n.textContent,
       );
     case NodeType.CDATA:
       return doc.createCDATASection(n.textContent);
@@ -161,8 +211,9 @@ export function buildNodeWithSN(
   map: idNodeMap,
   cbs: callbackArray,
   skipChild = false,
+  HACK_CSS = true,
 ): [INode | null, serializedNodeWithId[]] {
-  let node = buildNode(n, doc);
+  let node = buildNode(n, doc, HACK_CSS);
   if (!node) {
     return [null, []];
   }
@@ -191,7 +242,7 @@ export function buildNodeWithSN(
       return [node as INode, n.childNodes];
     }
     for (const childN of n.childNodes) {
-      const [childNode, nestedNodes] = buildNodeWithSN(childN, doc, map, cbs);
+      const [childNode, nestedNodes] = buildNodeWithSN(childN, doc, map, cbs, false, HACK_CSS);
       if (!childNode) {
         console.warn('Failed to rebuild', childN);
         continue;
@@ -216,14 +267,57 @@ export function buildNodeWithSN(
   return [node as INode, []];
 }
 
+function visit(idNodeMap: idNodeMap, onVisit: (node: INode) => void) {
+  function walk(node: INode) {
+    onVisit(node);
+  }
+
+  for (const key in idNodeMap) {
+    if (idNodeMap[key]) {
+      walk(idNodeMap[key]);
+    }
+  }
+}
+
+function handleScroll(node: INode) {
+  const n = node.__sn;
+  if (n.type !== NodeType.Element) {
+    return;
+  }
+  const el = (node as Node) as HTMLElement;
+  for (const name in n.attributes) {
+    if (!(n.attributes.hasOwnProperty(name) && name.startsWith('rr_'))) {
+      continue;
+    }
+    const value = n.attributes[name];
+    if (name === 'rr_scrollLeft') {
+      el.scrollLeft = value as number;
+    }
+    if (name === 'rr_scrollTop') {
+      el.scrollTop = value as number;
+    }
+  }
+}
+
 function rebuild(
   n: serializedNodeWithId,
   doc: Document,
+  onVisit?: (node: INode) => unknown,
+  /**
+   * This is not a public API yet, just for POC
+   */
+  HACK_CSS: boolean = true,
 ): [Node | null, idNodeMap] {
   const idNodeMap: idNodeMap = {};
   const callbackArray: callbackArray = [];
-  const [node] = buildNodeWithSN(n, doc, idNodeMap, callbackArray);
+  const [node] = buildNodeWithSN(n, doc, idNodeMap, callbackArray, false, HACK_CSS);
   callbackArray.forEach(f => f());
+  visit(idNodeMap, (visitedNode) => {
+    if (onVisit) {
+      onVisit(visitedNode);
+    }
+    handleScroll(visitedNode);
+  });
   return [node, idNodeMap];
 }
 
