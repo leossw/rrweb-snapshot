@@ -7,6 +7,8 @@ import {
   idNodeMap,
   MaskInputOptions,
   SlimDOMOptions,
+  snapshotOptions,
+  serializeOptions,
 } from './types';
 
 let _id = 1;
@@ -170,11 +172,19 @@ function serializeNode(
   maskInputOptions: MaskInputOptions = {},
   recordCanvas: boolean,
 ): serializedNode | false {
+  // Only record root id when document object is not the base document
+  let rootId: number | undefined;
+  if (((doc as unknown) as INode).__sn) {
+    const docId = ((doc as unknown) as INode).__sn.id;
+    rootId = docId === 1 ? undefined : docId;
+  }
   switch (n.nodeType) {
     case n.DOCUMENT_NODE:
       return {
+        // @ts-ignore
         type: NodeType.Document,
         childNodes: [],
+        rootId,
       };
     case n.DOCUMENT_TYPE_NODE:
       return {
@@ -182,6 +192,8 @@ function serializeNode(
         name: (n as DocumentType).name,
         publicId: (n as DocumentType).publicId,
         systemId: (n as DocumentType).systemId,
+        // @ts-ignore
+        rootId,
       };
     case n.ELEMENT_NODE:
       let needBlock = false;
@@ -290,6 +302,8 @@ function serializeNode(
         childNodes: [],
         isSVG: isSVGElement(n as Element) || undefined,
         needBlock,
+        // @ts-ignore
+        rootId,
       };
     case n.TEXT_NODE:
       // The parent node may not be a html element which has a tagName attribute.
@@ -305,19 +319,24 @@ function serializeNode(
         textContent = 'SCRIPT_PLACEHOLDER';
       }
       return {
+        // @ts-ignore
         type: NodeType.Text,
         textContent: textContent || '',
         isStyle,
+        rootId,
       };
     case n.CDATA_SECTION_NODE:
       return {
+        // @ts-ignore
         type: NodeType.CDATA,
         textContent: '',
+        rootId,
       };
     case n.COMMENT_NODE:
       return {
         type: NodeType.Comment,
         textContent: (n as Comment).textContent || '',
+        rootId,
       };
     default:
       return false;
@@ -405,13 +424,14 @@ export function serializeNodeWithId(
   n: Node | INode,
   doc: Document,
   map: idNodeMap,
-  blockClass: string | RegExp,
+  blockClass: string | RegExp = 'rr-block',
   skipChild = false,
   inlineStylesheet = true,
   maskInputOptions?: MaskInputOptions,
   slimDOMOptions: SlimDOMOptions = {},
   recordCanvas?: boolean,
   preserveWhiteSpace = true,
+  onVisit?: (n: INode) => void,
 ): serializedNodeWithId | null {
   const _serializedNode = serializeNode(
     n,
@@ -447,6 +467,11 @@ export function serializeNodeWithId(
     return null;  // slimDOM
   }
   map[id] = n as INode;
+
+  if (onVisit) {
+    onVisit(n as INode);
+  }
+
   let recordChild = !skipChild;
   if (serializedNode.type === NodeType.Element) {
     recordChild = recordChild && !serializedNode.needBlock;
@@ -478,9 +503,35 @@ export function serializeNodeWithId(
         slimDOMOptions,
         recordCanvas,
         preserveWhiteSpace,
+        onVisit,
       );
       if (serializedChildNode) {
         serializedNode.childNodes.push(serializedChildNode);
+      }
+    }
+  }
+
+  if (
+    serializedNode.type === NodeType.Element &&
+    serializedNode.tagName === 'iframe'
+  ) {
+    const iframeDoc = (n as HTMLIFrameElement).contentDocument;
+    if (iframeDoc) {
+      const serializedIframeNode = serializeNodeWithId(
+        iframeDoc,
+        iframeDoc,
+        map,
+        blockClass,
+        skipChild,
+        inlineStylesheet,
+        maskInputOptions,
+        slimDOMOptions,
+        recordCanvas,
+        preserveWhiteSpace,
+        onVisit,
+      );
+      if (serializedIframeNode) {
+        serializedNode.childNodes.push(serializedIframeNode);
       }
     }
   }
@@ -492,8 +543,11 @@ function snapshot(
   blockClass: string | RegExp = 'rr-block',
   inlineStylesheet = true,
   maskAllInputsOrOptions: boolean | MaskInputOptions,
-  slimDOMSensibleOrOptions: boolean | SlimDOMOptions,
+  slimDOMSensibleOrOptions?: boolean | SlimDOMOptions,
   recordCanvas?: boolean,
+  onVisit?: (n: INode) => void,
+  // @ts-ignore
+  test?: any = '123',
 ): [serializedNodeWithId | null, idNodeMap] {
   const idNodeMap: idNodeMap = {};
   const maskInputOptions: MaskInputOptions =
@@ -518,7 +572,7 @@ function snapshot(
       : maskAllInputsOrOptions === false
       ? {}
       : maskAllInputsOrOptions;
-  const slimDOMOptions: SlimDOMOptions =
+  const slimDOMOptions: SlimDOMOptions | undefined =
     (slimDOMSensibleOrOptions === true ||
      slimDOMSensibleOrOptions === 'all')
   // if true: set of sensible options that should not throw away any information
@@ -548,6 +602,8 @@ function snapshot(
       maskInputOptions,
       slimDOMOptions,
       recordCanvas,
+      true,
+      onVisit,
     ),
     idNodeMap,
   ];

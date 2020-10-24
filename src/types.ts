@@ -47,13 +47,15 @@ export type commentNode = {
   textContent: string;
 };
 
-export type serializedNode =
+export type serializedNode = (
   | documentNode
   | documentTypeNode
   | elementNode
   | textNode
   | cdataNode
-  | commentNode;
+  | commentNode) & {
+  rootId?: number;
+};
 
 export type serializedNodeWithId = serializedNode & { id: number };
 
@@ -67,6 +69,17 @@ export interface INode extends Node {
 
 export type idNodeMap = {
   [key: number]: INode;
+};
+
+export type callbackArray<T = Function> = T[];
+
+export type snapshotOptions = {
+  blockClass?: string | RegExp;
+  onVisit?: (n: INode) => void;
+};
+
+export type serializeOptions = snapshotOptions & {
+  skipChild?: boolean;
 };
 
 export type MaskInputOptions = Partial<{
