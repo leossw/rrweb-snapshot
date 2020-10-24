@@ -546,8 +546,6 @@ function snapshot(
   slimDOMSensibleOrOptions?: boolean | SlimDOMOptions,
   recordCanvas?: boolean,
   onVisit?: (n: INode) => void,
-  // @ts-ignore
-  test?: any = '123',
 ): [serializedNodeWithId | null, idNodeMap] {
   const idNodeMap: idNodeMap = {};
   const maskInputOptions: MaskInputOptions =
